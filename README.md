@@ -1,0 +1,40 @@
+# 文件夹索引 · 天枢插件
+
+天枢（Tianshu）TPI 2.0 插件：把本机各个 AI Agent 和编辑器用过的项目文件夹收拢到一个面板里，按抽屉分类、置顶、搜索，也能让天枢里的 Agent 直接查到项目路径。
+
+## 功能
+
+- **项目面板**：卡片目录柜（虚拟抽屉，最多两级）和彩色的 Agent 项目树。项目可以置顶、归类，重新扫描后归类保留。支持浅色、深色主题和多种排序。
+- **`folder_index_scan_agents`**：扫描本机 Agent 记录，更新项目索引。每次扫描都会弹确认框，由用户批准。
+- **`folder_index_search`**：按项目名、路径、抽屉或 Agent 名查询已索引的项目，供对话里的 Agent 使用。
+- **手动导入（可选）**：可以粘贴桌面端 Folder Index 导出的 JSON 快照。
+
+能识别的来源：Claude Code、Codex、WorkBuddy、VS Code、Cursor、Qoder、Trae、Windsurf、Kiro、Orca、opencode、Antigravity。
+
+## 用法
+
+1. 从插件库安装后，在侧栏打开「文件夹索引」。
+2. 在对话里说「帮我扫描本机全部 Agent 项目」，确认后面板会自动刷新。
+3. 用过桌面端 Folder Index 的话，扫描时告诉天枢索引目录在哪（例如「索引目录在 D:\索引」）。插件会记住这个目录，并沿用其中的抽屉分类。
+
+## 隐私
+
+- 扫描器只读，不联网，不调用模型。
+- 会话记录文件只读开头一段，用来找出工作目录，对话内容不会被保存或输出。
+- 数据只存在天枢分配给插件的数据目录里。
+
+完整的数据用途说明见 [PUBLISHING.md](PUBLISHING.md)。
+
+## 开发
+
+需要 Node 24 及以上，零依赖。
+
+```powershell
+npm test
+```
+
+`plugin/` 就是发行包的根目录。校验和打包用官方的 TPI 2.0 starter 脚本，命令见 [PUBLISHING.md](PUBLISHING.md)。注意：TPI 2.0 插件只有从插件库签名安装才会运行，本地目录不会加载。
+
+## 许可
+
+[MIT](LICENSE)

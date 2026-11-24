@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>文件夹索引</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="panel" class="app">
+    <aside class="cabinet" aria-label="分类抽屉">
+      <div class="cabinet-head">
+        <img class="logo" src="../icon.svg" alt="" width="34" height="34">
+        <div class="brand-text">
+          <div class="brand">文件夹索引</div>
+          <div id="cabinet-status" class="cabinet-status" role="status">正在连接天枢…</div>
+        </div>
+      </div>
+      <nav id="drawers" class="drawers"></nav>
+      <div class="cabinet-foot">
+        <div class="foot-actions">
+          <button id="add-drawer-open" class="new-drawer" type="button">＋ 添抽屉</button>
+          <button id="import-open" class="new-drawer" type="button">导入索引</button>
+        </div>
+        <p class="drag-hint">拖卡片进抽屉即可归类 · 仅存插件内</p>
+      </div>
+    </aside>
+
+    <main class="desk">
+      <header class="desk-head">
+        <div class="heading">
+          <p id="crumb" class="crumb">文 件 夹 索 引</p>
+          <h1 id="view-title" class="view-title">全部卡片</h1>
+        </div>
+        <div class="tools">
+          <label class="search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+            <input id="query" type="search" placeholder="查找卡片或 Agent" aria-label="查找卡片或 Agent" autocomplete="off" spellcheck="false">
+            <kbd>/</kbd>
+          </label>
+          <select id="sort-select" class="select-btn" aria-label="卡片排序方式" title="排序方式">
+            <option value="default">默认排序</option>
+            <option value="recent">最近活跃</option>
+            <option value="sessions">会话最多</option>
+          </select>
+          <button id="theme-toggle" class="btn" type="button" title="切换外观主题（跟随 / 纸白 / 暗木）">◐ 跟随</button>
+          <button id="tree-toggle" class="btn" type="button">Agent 项目树</button>
+          <button id="import-btn" class="btn primary" type="button">导入索引</button>
+        </div>
+      </header>
+
+      <div id="agent-bar" class="agent-bar" hidden aria-label="按 Agent 筛选"></div>
+
+      <section id="content" class="content" aria-live="polite">
+        <p class="placeholder">正在连接天枢…</p>
+      </section>
+    </main>
+  </div>
+
+  <!-- 导入索引弹窗 -->
+  <dialog id="import-dialog" class="dialog">
+    <div class="dialog-body">
+      <h2>导入或扫描项目索引</h2>
+      <p class="hint">方式一（推荐）：直接在天枢对话里说「帮我扫描本机全部 Agent 项目」，确认授权后插件会自动扫描并实时刷新本面板。<br>方式二（可选）：如果装了桌面端 Folder Index，可以在它的「更多操作 → 导出到天枢」复制 JSON 粘贴到下方；之后扫描时告诉天枢索引目录在哪（例如「索引目录在 D:\索引」），插件会记住它，并保留其中的抽屉分类。</p>
+      <textarea id="snapshot" class="export-snapshot" spellcheck="false" rows="6" placeholder='{"schema":"folder-index.projects/1","projects":[...]}'></textarea>
+      <p id="dialog-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="import-cancel" type="button" class="btn">取消</button>
+        <button id="import-submit" type="button" class="btn primary" disabled>导入并更新</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 新建虚拟抽屉弹窗 -->
+  <dialog id="drawer-dialog" class="dialog">
+    <div class="dialog-body">
+      <h2>添一个虚拟抽屉</h2>
+      <p class="hint">虚拟抽屉保存在天枢插件自己的数据目录中，不会改动你的本机磁盘目录，重新扫描时会自动保留归类。</p>
+      <div class="fields">
+        <div class="field">
+          <label for="drawer-parent">所属位置</label>
+          <select id="drawer-parent"></select>
+        </div>
+        <div class="field">
+          <label for="drawer-name">抽屉名称</label>
+          <input id="drawer-name" type="text" placeholder="例如：项目、研究、天枢插件" maxlength="120" spellcheck="false">
+        </div>
+      </div>
+      <p id="drawer-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="drawer-cancel" type="button" class="btn">取消</button>
+        <button id="drawer-submit" type="button" class="btn primary">创建抽屉</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 快捷归类弹窗 -->
+  <dialog id="assign-dialog" class="dialog">
+    <div class="dialog-body">
+      <h2 id="assign-title">归类到抽屉</h2>
+      <p id="assign-path" class="hint mono-hint"></p>
+      <div class="fields">
+        <div class="field">
+          <label for="assign-select">选择已有抽屉</label>
+          <select id="assign-select"></select>
+        </div>
+        <div class="field">
+          <label for="assign-new">或直接新建一级抽屉（留空则使用上方选择）</label>
+          <input id="assign-new" type="text" placeholder="例如：重点项目" maxlength="120" spellcheck="false">
+        </div>
+      </div>
+      <p id="assign-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="assign-cancel" type="button" class="btn">取消</button>
+        <button id="assign-submit" type="button" class="btn primary">放进抽屉</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>

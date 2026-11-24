@@ -1,0 +1,41 @@
+{
+  "$tpi": "2.0",
+  "kind": "tianshu.plugin",
+  "id": "folder-index",
+  "displayName": "文件夹索引",
+  "version": "0.1.0",
+  "description": "在天枢中以卡片目录柜与彩色 Agent 项目树查看、搜索、置顶本机全部 AI Agent 用过的项目，并支持确认式自动扫描同步。",
+  "runtime": "agent",
+  "entry": "index.mjs",
+  "engines": { "tianshu": ">=4.0.5 <5.0.0" },
+  "capabilities": ["tools", "storage", "ui", "shell"],
+  "permissions": {
+    "shell": { "run": true }
+  },
+  "contributes": {
+    "tools": [
+      {
+        "name": "folder_index_search",
+        "description": "查找本机项目索引，支持按项目名、路径、抽屉或 Agent 名称搜索，返回匹配项目详情。"
+      },
+      {
+        "name": "folder_index_scan_agents",
+        "description": "只读扫描本机全部 AI Agent 与编辑器会话记录及可选索引目录，自动更新天枢中的项目索引（每次需用户确认）。"
+      }
+    ],
+    "ui": {
+      "views": [
+        { "id": "projects", "title": "文件夹索引", "entry": "views/panel.html" }
+      ],
+      "navigation": [
+        { "view": "projects", "icon": "icon.svg" }
+      ],
+      "panels": [
+        { "view": "projects", "label": "项目速查" }
+      ],
+      "commands": [
+        { "id": "open-projects", "title": "打开文件夹索引", "view": "projects" }
+      ]
+    }
+  }
+}
