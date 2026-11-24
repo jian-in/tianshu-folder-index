@@ -138,9 +138,17 @@ export function isNetworkOrDevicePath(p) {
 }
 
 const SKIP_EXACT = new Set(['windows', 'program files', 'program files (x86)', 'programdata', '$recycle.bin']);
-const SKIP_SEGMENTS = new Set(['.git', 'node_modules', 'dist', 'build', 'target', '__pycache__']);
+// 与桌面端 Folder Index（lib/discover.mjs 的 INTERNAL_SEGMENTS）保持一致：构建产物、虚拟环境、工具内部数据目录
+const SKIP_SEGMENTS = new Set([
+  '.git', 'node_modules', 'dist', 'build', 'out', 'target', '__pycache__', '.data', '.cache', '.venv', 'venv', '.next',
+]);
+// Agent 自动创建、按日期命名的临时会话目录，例如 Documents\Codex\2026-11-24\new-chat，整棵子树都不算项目。
+const SCRATCH_PATTERNS = [
+  /[\\/]documents[\\/](codex|qoder|claude)[\\/]\d{4}-\d{2}-\d{2}([\\/]|$)/i,
+  /[\\/]workbuddy[\\/]\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}([\\/]|$)/i,
+];
 
-function shouldSkip(p, home) {
+export function shouldSkip(p, home, hubDir = '') {
   if (!p) return true;
   const lower = p.toLowerCase();
   const root = parse(p).root.toLowerCase();
@@ -150,6 +158,12 @@ function shouldSkip(p, home) {
   if (lower === h) return true;
   if (lower.startsWith(join(h, 'appdata').toLowerCase())) return true;
   if (lower.includes(`${sep}.claude${sep}worktrees`) || lower.includes(`${sep}worktrees${sep}`)) return true;
+  if (SCRATCH_PATTERNS.some((re) => re.test(lower))) return true;
+  // 通过索引目录里的联接打开的路径，真实项目已经按链接目标收录过了
+  if (hubDir) {
+    const hub = resolve(hubDir).toLowerCase();
+    if (lower === hub || lower.startsWith(hub + sep)) return true;
+  }
 
   const segs = p.split(/[\\/]+/).filter(Boolean).map((s) => s.toLowerCase());
   if (segs.length <= 1) return true;
@@ -426,7 +440,7 @@ export async function scanAllProjects(options = {}) {
     for (const [key, rec] of discoveredMap.entries()) {
       if (indexedPaths.has(key)) continue;
       if (onlyWithSessions && rec.sessions <= 0) continue;
-      if (shouldSkip(rec.path, sources.home)) continue;
+      if (shouldSkip(rec.path, sources.home, hubDir)) continue;
       candidates.push(rec);
     }
 

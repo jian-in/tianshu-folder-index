@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseSnapshot, searchProjects, serializeSnapshot } from '../plugin/catalog.mjs';
-import { BEGIN_MARKER, END_MARKER, cleanPath } from '../plugin/scanner.mjs';
+import { BEGIN_MARKER, END_MARKER, cleanPath, shouldSkip } from '../plugin/scanner.mjs';
 
 globalThis.__tianshuTPI = { version: '2.0', defineTianshuPlugin: (spec) => spec };
 const { default: plugin, buildScanCommands } = await import('../plugin/index.mjs');
@@ -187,6 +187,24 @@ test('扫描器丢弃网络共享、设备路径和相对路径，长路径前�
     assert.equal(cleanPath('\\\\?\\e:\\project\\'), 'E:\\project');
     assert.equal(cleanPath('file:///E:/project'), 'E:\\project');
   }
+});
+
+test('扫描器与桌面端一样跳过临时会话目录、构建目录和索引目录本身', { skip: process.platform !== 'win32' }, () => {
+  const home = 'C:\\Users\\me';
+  // Agent 按日期自动建的临时目录（整棵子树）
+  assert.equal(shouldSkip('C:\\Users\\me\\Documents\\Codex\\2026-11-24\\new-chat', home), true);
+  assert.equal(shouldSkip('C:\\Users\\me\\Documents\\Qoder\\2026-07-18\\x\\outputs', home), true);
+  assert.equal(shouldSkip('C:\\Users\\me\\WorkBuddy\\2026-11-02-10-20-30', home), true);
+  // 构建产物与虚拟环境
+  assert.equal(shouldSkip('E:\\app\\.venv', home), true);
+  assert.equal(shouldSkip('E:\\web\\.next\\server', home), true);
+  // 经索引目录联接打开的路径
+  assert.equal(shouldSkip('E:\\索引\\项目\\demo', home, 'E:\\索引'), true);
+  // 正常项目不受影响，包括名字里恰好带日期的上级目录
+  assert.equal(shouldSkip('E:\\考研\\DeepTutor', home), false);
+  assert.equal(shouldSkip('C:\\Users\\me\\Documents\\Codex', home), false);
+  assert.equal(shouldSkip('E:\\notes\\2026-11-24-plan\\site', home), false);
+  assert.equal(shouldSkip('E:\\索引-备份\\demo', home, 'E:\\索引'), false);
 });
 
 test('扫描命令同时适配 Git Bash 与 PowerShell', () => {
