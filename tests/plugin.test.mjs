@@ -76,7 +76,7 @@ test('无效导入和越过当前索引的置顶请求保留已有数据', async
   await assert.rejects(message({ action: 'import', text: ' '.repeat(96 * 1024 + 1) }), /96 KiB/);
   await assert.rejects(message({ action: 'pin', path: 'E:\\demo\\unlisted', pinned: true }), /不在当前索引/);
   await assert.rejects(runtime.ui.onMessage('other', { action: 'list' }), /无效的项目速查消息/);
-  assert.deepEqual(await message({ action: 'list' }), saved);
+  assert.deepEqual((await message({ action: 'list' })).projects, saved.projects);
   assert.equal((await runtime.tools[0].execute({ args: { query: '', limit: 500 } })).isError, true);
 });
 

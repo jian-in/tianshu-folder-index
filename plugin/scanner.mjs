@@ -1,6 +1,7 @@
 // 包内只读扫描脚本：仅在用户明确批准 folder_index_scan_agents 工具后，经天枢 host.shell.run 执行。
 // 严格只读：扫描本机各 AI Agent / 编辑器的会话记录与工作区记录，以及调用方给出的 Folder Index 索引目录；绝不写入、删除或联网。
-// 会话记录文件只读开头一段（最多 256 KiB）用来找出工作目录，输出里只有项目路径、名称、Agent 名、会话数和最近活跃时间，不含对话内容。
+// 会话记录文件只读开头一段（最多 256 KiB）用来找出工作目录；对每个项目再列一次根目录文件名识别技术栈、读 .git/HEAD 得到分支。
+// 输出里只有项目路径、名称、Agent 名、会话数、最近活跃时间、技术栈标签和分支名，不含对话内容和文件内容。
 import { lstat, open, readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, parse, resolve, sep } from 'node:path';
@@ -75,6 +76,63 @@ async function mapPool(items, fn) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker));
+}
+
+// 项目根目录里出现这些文件名，就记一个技术栈标签（只看文件名，不读内容）。
+const STACK_MARKERS = [
+  ['package.json', 'Node'], ['tsconfig.json', 'TypeScript'], ['deno.json', 'Deno'], ['bun.lockb', 'Bun'],
+  ['cargo.toml', 'Rust'], ['go.mod', 'Go'],
+  ['pyproject.toml', 'Python'], ['requirements.txt', 'Python'], ['setup.py', 'Python'], ['environment.yml', 'Python'],
+  ['pom.xml', 'Java'], ['build.gradle', 'Java'], ['build.gradle.kts', 'Kotlin'],
+  ['cmakelists.txt', 'C/C++'], ['makefile', 'Make'], ['gemfile', 'Ruby'], ['composer.json', 'PHP'],
+  ['pubspec.yaml', 'Flutter'], ['package.swift', 'Swift'], ['dockerfile', 'Docker'],
+  ['tianshu.plugin.json', '天枢插件'], ['.obsidian', 'Obsidian'],
+];
+const STACK_EXTENSIONS = [['.sln', '.NET'], ['.csproj', '.NET'], ['.ipynb', 'Jupyter']];
+const MAX_STACK = 8;
+
+/** 读取 .git/HEAD 得到当前分支；.git 是文件（worktree / submodule）时跟着 gitdir 找。不执行 git 命令。 */
+async function readGitBranch(dir) {
+  let gitDir = join(dir, '.git');
+  try {
+    const st = await lstat(gitDir);
+    if (st.isFile()) {
+      const pointer = (await readHead(gitDir, 4096)).match(/^gitdir:\s*(.+)$/m)?.[1]?.trim();
+      if (!pointer) return '';
+      gitDir = cleanPath(resolve(dir, pointer));
+      if (!gitDir) return '';
+    } else if (!st.isDirectory()) {
+      return '';
+    }
+  } catch {
+    return '';
+  }
+  const head = (await readHead(join(gitDir, 'HEAD'), 4096)).trim();
+  const ref = head.match(/^ref:\s*refs\/heads\/(.+)$/)?.[1];
+  if (ref) return ref.slice(0, 120);
+  return /^[0-9a-f]{40,64}$/i.test(head) ? `detached@${head.slice(0, 7)}` : '';
+}
+
+/** 只读识别项目画像：技术栈标签和 Git 分支。目录读不到时返回空。 */
+export async function profileProject(dir) {
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch {
+    return {};
+  }
+  const lower = new Set(names.map((name) => name.toLowerCase()));
+  const stack = [];
+  const add = (tag) => { if (!stack.includes(tag) && stack.length < MAX_STACK) stack.push(tag); };
+  for (const [marker, tag] of STACK_MARKERS) if (lower.has(marker)) add(tag);
+  for (const [ext, tag] of STACK_EXTENSIONS) if ([...lower].some((name) => name.endsWith(ext))) add(tag);
+  const profile = {};
+  if (stack.length) profile.stack = stack;
+  if (lower.has('.git')) {
+    const branch = await readGitBranch(dir);
+    if (branch) profile.branch = branch;
+  }
+  return profile;
 }
 
 async function collectFiles(dir, ext, maxDepth) {
@@ -470,6 +528,7 @@ export async function scanAllProjects(options = {}) {
 
   // 控制数量与 96 KiB 快照大小上限：保留已收录项优先，其余按最近活跃截断
   let trimmed = projects.slice(0, MAX_PROJECTS);
+  await mapPool(trimmed, async (item) => Object.assign(item, await profileProject(item.path)));
   while (trimmed.length > 0) {
     try {
       const snapshotText = serializeSnapshot(trimmed);

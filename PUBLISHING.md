@@ -14,8 +14,10 @@
 用官方 TPI 2.0 starter 里的 `scripts/pack.mjs`，在 starter 目录运行（Node ≥ 24）：
 
 ```powershell
-node scripts/pack.mjs --plugin-dir <本仓库>/plugin --publisher-id <发布者ID> --lane official_reviewed --platforms win32-x64,darwin-arm64 --source-commit <源码提交>
+node scripts/pack.mjs --plugin-dir <本仓库>/plugin --publisher-id <发布者ID> --lane official_reviewed --platforms win32-x64 --source-commit <源码提交>
 ```
+
+目前只声明 `win32-x64`：扫描器只在 Windows 上实测过，macOS 和 Linux 上各家 Agent 的记录位置还没有补全和验证。
 
 生成的 ZIP 会自动重新校验。CI 和人工审核必须用同一份 ZIP，记下输出里的 `zipSha256`。
 
@@ -33,6 +35,7 @@ node scripts/pack.mjs --plugin-dir <本仓库>/plugin --publisher-id <发布者I
   - opencode 和 Antigravity 的 SQLite 记录（只读打开）
 - 会话记录文件只读开头一段（最多 256 KiB），用来取出工作目录字段。对话内容不会被保存、输出，也不会发出去。
 - 用户在扫描时给出 Folder Index 索引目录的话，扫描器会读取这个目录下的目录联接，用来保留抽屉分类。不给就不读。
+- 对扫描到的每个项目，扫描器会列出项目根目录的文件名（不读文件内容），用来识别技术栈，比如有 `package.json` 就标记 Node。项目里有 `.git` 的，再读取 `.git/HEAD`（worktree 读它指向的 HEAD）得到当前分支名。扫描器不执行 git 命令，也不读提交内容。
 - 扫描器跳过网络共享和设备路径，不会因为记录里的路径去访问其他主机。
 
 **本地写入**
@@ -41,10 +44,12 @@ node scripts/pack.mjs --plugin-dir <本仓库>/plugin --publisher-id <发布者I
 
 | 文件 | 内容 |
 | --- | --- |
-| `projects.json` | 项目名、路径、抽屉、Agent 名、会话数、最近活跃时间 |
+| `projects.json` | 项目名、路径、抽屉、Agent 名、会话数、最近活跃时间、技术栈标签、Git 分支名 |
 | `pinned/`、`overrides/` | 置顶和归类 |
+| `notes/` | 项目备注（用户在面板写的，或 Agent 通过 `folder_index_note` 写的），每个项目一份，最多 500 字 |
 | `drawers.json` | 虚拟抽屉 |
 | `prefs.json` | 主题、排序、上次用的索引目录 |
+| `meta.json` | 上次扫描或导入的时间和方式 |
 
 插件不改动、不删除用户磁盘上的其他文件。
 
@@ -60,8 +65,8 @@ node scripts/pack.mjs --plugin-dir <本仓库>/plugin --publisher-id <发布者I
 
 | 能力 | 用途 |
 | --- | --- |
-| `tools` | `folder_index_search`（只读查询已导入的项目）、`folder_index_scan_agents`（扫描） |
-| `storage` | 保存项目快照、置顶、归类和偏好 |
+| `tools` | `folder_index_search`、`folder_index_recent`（只读查询已导入的项目）；`folder_index_note`（只写插件数据目录里的备注）；`folder_index_scan_agents`（扫描） |
+| `storage` | 保存项目快照、置顶、归类、备注和偏好 |
 | `ui` | 「文件夹索引」面板：卡片目录柜和 Agent 项目树 |
 | `shell` + `permissions.shell.run` | 只用来运行包内的 `scanner.mjs`。命令由插件按固定格式拼出：天枢自带的 Node 运行时 + 扫描器路径 + Base64URL 编码的参数，用户输入不会原样进入命令行。命令同时兼容 Git Bash 和 PowerShell。 |
 

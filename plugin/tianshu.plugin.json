@@ -4,7 +4,7 @@
   "id": "folder-index",
   "displayName": "文件夹索引",
   "version": "0.1.0",
-  "description": "在天枢中以卡片目录柜与彩色 Agent 项目树查看、搜索、置顶本机全部 AI Agent 用过的项目，并支持确认式自动扫描同步。",
+  "description": "在天枢中以卡片目录柜与彩色 Agent 项目树查看、搜索、置顶本机全部 AI Agent 用过的项目，识别技术栈与 Git 分支，可写项目备注，并支持确认式自动扫描同步。",
   "runtime": "agent",
   "entry": "index.mjs",
   "engines": { "tianshu": ">=4.0.5 <5.0.0" },
@@ -17,6 +17,14 @@
       {
         "name": "folder_index_search",
         "description": "查找本机项目索引，支持按项目名、路径、抽屉或 Agent 名称搜索，返回匹配项目详情。"
+      },
+      {
+        "name": "folder_index_recent",
+        "description": "列出最近活跃的项目（按 Agent 最后一次使用时间倒序），带技术栈、Git 分支、用过的 Agent 和备注，并说明索引上次扫描是什么时候。"
+      },
+      {
+        "name": "folder_index_note",
+        "description": "给索引里的某个项目写一条备注（例如进度、下一步、注意事项），重新扫描后仍保留；传空字符串删除备注。之后搜索和最近项目都会带上它。"
       },
       {
         "name": "folder_index_scan_agents",

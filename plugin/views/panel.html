@@ -116,6 +116,27 @@
     </div>
   </dialog>
 
+  <!-- 项目备注弹窗 -->
+  <dialog id="note-dialog" class="dialog">
+    <div class="dialog-body">
+      <h2 id="note-title">项目备注</h2>
+      <p id="note-path" class="hint mono-hint"></p>
+      <div class="fields">
+        <div class="field">
+          <label for="note-input">写给以后的自己，也写给 Agent：进度、下一步、注意事项都行。重新扫描不会丢。</label>
+          <textarea id="note-input" rows="5" maxlength="500" spellcheck="false" placeholder="例如：下次继续修 UNC 过滤；发布前记得跑 npm test"></textarea>
+          <span id="note-count" class="hint note-count"></span>
+        </div>
+      </div>
+      <p id="note-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="note-delete" type="button" class="btn danger-text">删除备注</button>
+        <button id="note-cancel" type="button" class="btn">取消</button>
+        <button id="note-save" type="button" class="btn primary">保存（Ctrl+Enter）</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
   <script type="module" src="panel.js"></script>
 </body>

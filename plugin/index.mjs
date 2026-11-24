@@ -18,6 +18,14 @@ const SCAN_DESC = '只读扫描本机全部 AI Agent 与编辑器会话记录及
 const CATALOG = 'projects.json';
 const DRAWERS_FILE = 'drawers.json';
 const PREFS_FILE = 'prefs.json';
+const META_FILE = 'meta.json';
+const MAX_NOTE = 500;
+const DAY_MS = 86_400_000;
+const STALE_DAYS = 7;
+const NOTE_TOOL = 'folder_index_note';
+const NOTE_DESC = '给索引里的某个项目写一条备注（例如进度、下一步、注意事项），重新扫描后仍保留；传空字符串删除备注。之后搜索和最近项目都会带上它。';
+const RECENT_TOOL = 'folder_index_recent';
+const RECENT_DESC = '列出最近活跃的项目（按 Agent 最后一次使用时间倒序），带技术栈、Git 分支、用过的 Agent 和备注，并说明索引上次扫描是什么时候。';
 const MAX_DRAWERS = 64;
 const UNSAFE_SHELL_PATH = /["'`$;&|\r\n<>]/;
 const SHELL_SAFE_WORD = /^[\p{L}\p{N}_.:/-]+$/u;
@@ -165,6 +173,7 @@ async function listProjects(dataDir) {
     readOverrides(dataDir),
   ]);
   const pinSet = new Set(markers);
+  const notes = await readNotes(dataDir);
   return projects.map((project) => {
     const id = pinId(project.path);
     const out = { ...project, pinned: pinSet.has(id) };
@@ -172,13 +181,98 @@ async function listProjects(dataDir) {
       out.category = overrides.get(id);
       delete out.indexed;
     }
+    if (notes.has(id)) out.note = notes.get(id);
     return out;
   });
 }
 
-async function importSnapshot(dataDir, text) {
+async function importSnapshot(dataDir, text, source = 'paste') {
   const snapshot = parseSnapshot(text);
   await writeAtomicJson(dataDir, CATALOG, snapshot);
+  await writeAtomicJson(dataDir, META_FILE, { lastImport: { at: Date.now(), source } });
+}
+
+/** 最近一次导入或扫描的时间和来源；超过 STALE_DAYS 天视为过期。 */
+async function readLastImport(dataDir) {
+  const raw = await readFile(join(dataDir, META_FILE), 'utf8').catch(ifMissing(null));
+  try {
+    const { at, source } = JSON.parse(raw)?.lastImport ?? {};
+    if (!Number.isInteger(at) || at <= 0) return null;
+    return { at, source: source === 'scan' ? 'scan' : 'paste', stale: Date.now() - at > STALE_DAYS * DAY_MS };
+  } catch {
+    return null;
+  }
+}
+
+// ---------- 项目备注：每个项目一个文件，主人在面板写、Agent 通过 folder_index_note 写 ----------
+
+async function readNotes(dataDir) {
+  const dir = join(dataDir, 'notes');
+  const names = await readdir(dir).catch(ifMissing([]));
+  const map = new Map();
+  for (const name of names) {
+    if (!/^[0-9a-f]{64}\.json$/.test(name)) continue;
+    try {
+      const parsed = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      if (typeof parsed?.text !== 'string' || !parsed.text || parsed.text.length > MAX_NOTE) continue;
+      map.set(name.slice(0, 64), {
+        text: parsed.text,
+        updatedAt: Number.isInteger(parsed.updatedAt) ? parsed.updatedAt : 0,
+        by: parsed.by === 'agent' ? 'agent' : 'user',
+      });
+    } catch {
+      // 忽略损坏的单条备注
+    }
+  }
+  return map;
+}
+
+function checkNote(text) {
+  if (typeof text !== 'string' || text.length > MAX_NOTE || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) {
+    throw new Error(`备注需为 ${MAX_NOTE} 字以内的文字，传空字符串表示删除`);
+  }
+  return text.trim();
+}
+
+async function setNote(dataDir, path, rawText, by) {
+  const text = checkNote(rawText);
+  if (typeof path !== 'string' || !(await listProjects(dataDir)).some((p) => pathKey(p.path) === pathKey(path))) {
+    throw new Error('所选项目已不在当前索引中');
+  }
+  const file = join(dataDir, 'notes', `${pinId(path)}.json`);
+  if (text) await writeAtomicJson(join(dataDir, 'notes'), `${pinId(path)}.json`, { text, updatedAt: Date.now(), by });
+  else await unlink(file).catch(ifMissing(undefined));
+  return text ? { text, updatedAt: Date.now(), by } : null;
+}
+
+/** 按完整路径或项目名找到唯一项目；名字重复时报出候选路径，让调用方改用路径。 */
+function resolveProject(projects, ref) {
+  if (typeof ref !== 'string' || !ref.trim()) throw new Error('请给出项目名或完整路径');
+  const wanted = ref.trim();
+  const byPath = projects.find((p) => pathKey(p.path) === pathKey(wanted));
+  if (byPath) return byPath;
+  const byName = projects.filter((p) => p.name.toLowerCase() === wanted.toLowerCase());
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) throw new Error(`有 ${byName.length} 个同名项目，请改用完整路径：${byName.map((p) => p.path).join('；')}`);
+  throw new Error(`索引里没有「${wanted}」，可先用 folder_index_search 查找`);
+}
+
+/** 给 Agent 看的项目摘要：时间换成本地可读的 ISO 字符串，去掉面板才用的字段。 */
+function forAgent(project) {
+  const out = { name: project.name, path: project.path, category: project.category };
+  for (const key of ['agents', 'sessions', 'stack', 'branch', 'pinned']) if (project[key] !== undefined) out[key] = project[key];
+  if (project.lastActive) out.lastActive = new Date(project.lastActive).toISOString();
+  if (project.indexed === false) out.indexed = false;
+  if (project.note) out.note = { text: project.note.text, by: project.note.by, updatedAt: new Date(project.note.updatedAt).toISOString() };
+  return out;
+}
+
+function recentProjects(projects, { limit, days }) {
+  const since = days ? Date.now() - days * DAY_MS : 0;
+  return projects
+    .filter((p) => p.lastActive && p.lastActive >= since)
+    .sort((a, b) => b.lastActive - a.lastActive)
+    .slice(0, limit);
 }
 
 async function setPinned(dataDir, path, pinned) {
@@ -300,7 +394,62 @@ export default sdk.defineTianshuPlugin({
               return { content: '请输入 1 至 200 个字符的关键词，结果上限为 20。', isError: true };
             }
             const results = searchProjects(await listProjects(dataDir), query);
-            return { content: JSON.stringify({ total: results.length, projects: results.slice(0, limit) }) };
+            return { content: JSON.stringify({ total: results.length, projects: results.slice(0, limit).map(forAgent) }) };
+          },
+        },
+        {
+          name: RECENT_TOOL,
+          description: RECENT_DESC,
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'integer', minimum: 1, maximum: 20, description: '最多返回几个项目，默认 8' },
+              days: { type: 'integer', minimum: 1, maximum: 365, description: '只看最近多少天内用过的项目，省略表示不限' },
+            },
+            additionalProperties: false,
+          },
+          concurrencySafe: true,
+          async execute({ args }) {
+            const { limit = 8, days } = args ?? {};
+            if (!Number.isInteger(limit) || limit < 1 || limit > 20
+              || (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365))) {
+              return { content: 'limit 需为 1 至 20 的整数，days 需为 1 至 365 的整数。', isError: true };
+            }
+            const [projects, lastImport] = await Promise.all([listProjects(dataDir), readLastImport(dataDir)]);
+            const recent = recentProjects(projects, { limit, days });
+            return {
+              content: JSON.stringify({
+                lastScan: lastImport ? { at: new Date(lastImport.at).toISOString(), source: lastImport.source, stale: lastImport.stale } : null,
+                hint: !lastImport ? '索引还是空的，可以先调用 folder_index_scan_agents 扫描。'
+                  : lastImport.stale ? `索引已经超过 ${STALE_DAYS} 天没更新，最近的项目可能不全，可以调用 folder_index_scan_agents 重新扫描。` : undefined,
+                projects: recent.map(forAgent),
+              }),
+            };
+          },
+        },
+        {
+          name: NOTE_TOOL,
+          description: NOTE_DESC,
+          inputSchema: {
+            type: 'object',
+            required: ['project', 'note'],
+            properties: {
+              project: { type: 'string', minLength: 1, maxLength: 1024, description: '项目名或完整路径（同名时必须用路径）' },
+              note: { type: 'string', maxLength: MAX_NOTE, description: `备注内容，${MAX_NOTE} 字以内；空字符串表示删除` },
+            },
+            additionalProperties: false,
+          },
+          concurrencySafe: false,
+          async execute({ args }) {
+            try {
+              const project = resolveProject(await listProjects(dataDir), args?.project);
+              const note = await setNote(dataDir, project.path, args?.note, 'agent');
+              const [projects, drawers] = await Promise.all([listProjects(dataDir), readDrawers(dataDir)]);
+              await host.ui?.post(VIEW, { action: 'updated', projects, drawers }).catch(() => {});
+              return { content: JSON.stringify({ project: project.name, path: project.path, note: note ? note.text : null }) };
+            } catch (error) {
+              return { content: error.message, isError: true };
+            }
           },
         },
         {
@@ -363,10 +512,10 @@ export default sdk.defineTianshuPlugin({
                 return { content: `扫描命令退出码 ${res.exitCode}${detail ? `：${detail}` : ''}`, isError: true };
               }
               const snapshotText = extractSnapshotFromOutput(res.output);
-              await importSnapshot(dataDir, snapshotText);
+              await importSnapshot(dataDir, snapshotText, 'scan');
               if (hubDir !== undefined) await rememberHubDir(dataDir, hubDir.trim());
-              const [projects, drawers] = await Promise.all([listProjects(dataDir), readDrawers(dataDir)]);
-              await host.ui?.post(VIEW, { action: 'updated', projects, drawers }).catch(() => {});
+              const [projects, drawers, lastImport] = await Promise.all([listProjects(dataDir), readDrawers(dataDir), readLastImport(dataDir)]);
+              await host.ui?.post(VIEW, { action: 'updated', projects, drawers, lastImport }).catch(() => {});
 
               const agents = [...new Set(projects.flatMap((p) => p.agents ?? []))];
               const indexedCount = projects.filter((p) => p.indexed !== false).length;
@@ -400,10 +549,13 @@ export default sdk.defineTianshuPlugin({
                 projects: await listProjects(dataDir),
                 drawers: await readDrawers(dataDir),
                 prefs: await readPrefs(dataDir),
+                lastImport: await readLastImport(dataDir),
               };
             case 'import':
-              await importSnapshot(dataDir, message.text);
-              return { projects: await listProjects(dataDir) };
+              await importSnapshot(dataDir, message.text, 'paste');
+              return { projects: await listProjects(dataDir), lastImport: await readLastImport(dataDir) };
+            case 'setNote':
+              return { path: message.path, note: await setNote(dataDir, message.path, message.text, 'user') };
             case 'pin':
               return setPinned(dataDir, message.path, message.pinned);
             case 'assign':

@@ -1,6 +1,7 @@
 const SNAPSHOT_SCHEMA = 'folder-index.projects/1';
 const MAX_PROJECTS = 500;
 const MAX_AGENTS = 16;
+const MAX_STACK = 8;
 // 快照作为字符串传送，给 TPI 的 256 KiB 页面消息留出 JSON 转义空间。
 const MAX_SNAPSHOT_BYTES = 96 * 1024;
 
@@ -48,6 +49,13 @@ function normalizeOptionalMeta(project) {
   if (project.indexed === false) {
     meta.indexed = false;
   }
+  if (Array.isArray(project.stack) && project.stack.length > 0) {
+    const stack = [...new Set(project.stack.slice(0, MAX_STACK).map((raw) => checkText(raw, 24, '技术栈')))];
+    if (stack.length > 0) meta.stack = stack;
+  }
+  if (project.branch !== undefined && project.branch !== null && project.branch !== '') {
+    meta.branch = checkText(project.branch, 120, 'Git 分支');
+  }
   return meta;
 }
 
@@ -91,7 +99,7 @@ export function pathKey(path) {
   return path.toLowerCase();
 }
 
-/** 查询每个词，名称命中优先。同等匹配时置顶项目排在前面。 */
+/** 查询每个词（名称、路径、抽屉、Agent、技术栈、分支、备注），名称命中优先。同等匹配时置顶项目排在前面。 */
 export function searchProjects(projects, query = '', category = null) {
   const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
   const matches = [];
@@ -106,6 +114,9 @@ export function searchProjects(projects, query = '', category = null) {
       pathKey(project.path),
       ...project.category.map((part) => part.toLowerCase()),
       ...(project.agents ?? []).map((agent) => agent.toLowerCase()),
+      ...(project.stack ?? []).map((tech) => tech.toLowerCase()),
+      (project.branch ?? '').toLowerCase(),
+      (project.note?.text ?? '').toLowerCase(),
     ].join('\n');
     if (!words.every((word) => searchable.includes(word))) continue;
     const score = words.reduce((sum, word) => sum + (name.startsWith(word) ? 3 : name.includes(word) ? 2 : 0), 0);

@@ -17,6 +17,8 @@ const drawerParentEl = $('drawer-parent');
 const drawerNameEl = $('drawer-name');
 const drawerErrorEl = $('drawer-error');
 const assignDialogEl = $('assign-dialog');
+const noteDialogEl = $('note-dialog');
+const noteInputEl = $('note-input');
 const assignSelectEl = $('assign-select');
 const assignNewEl = $('assign-new');
 const assignErrorEl = $('assign-error');
@@ -41,6 +43,7 @@ const state = {
   query: '',
   agentFilter: null,
   draggingPath: null,
+  lastImport: null, // { at, source: 'scan' | 'paste', stale }
 };
 
 // ---------- TPI 2.0 通信 ----------
@@ -489,6 +492,8 @@ function projectCard(project, number, showLocation = false) {
     el('span', { className: 'card-path', text: project.path }),
     agentLine,
     statLine,
+    devLine(project),
+    noteLine(project),
   ]);
 
   const moveBtn = el('button', {
@@ -516,8 +521,97 @@ function projectCard(project, number, showLocation = false) {
     },
   });
 
-  art.append(openBtn, el('div', { className: 'card-actions' }, [moveBtn, pinBtn]));
+  const noteBtn = el('button', {
+    type: 'button',
+    className: `card-act${project.note ? ' has-note' : ''}`,
+    text: '✎',
+    title: project.note ? '编辑备注' : '写备注',
+    ariaLabel: `给「${project.name}」写备注`,
+    onClick: (e) => {
+      e.stopPropagation();
+      openNoteDialog(project);
+    },
+  });
+
+  art.append(openBtn, el('div', { className: 'card-actions' }, [noteBtn, moveBtn, pinBtn]));
   return art;
+}
+
+/** 第三行：Git 分支和技术栈；第四行：备注（有才显示）。 */
+function devLine(project) {
+  if (!project.branch && !project.stack?.length) return null;
+  const line = el('span', { className: 'card-dev' });
+  if (project.branch) line.append(el('span', { className: 'card-branch', text: `⎇ ${project.branch}`, title: `Git 分支：${project.branch}` }));
+  for (const tech of project.stack ?? []) line.append(el('span', { className: 'card-tech', text: tech }));
+  return line;
+}
+
+function noteLine(project) {
+  if (!project.note) return null;
+  const who = project.note.by === 'agent' ? 'Agent' : '我';
+  const when = project.note.updatedAt ? ` · ${formatAgo(project.note.updatedAt)}` : '';
+  return el('span', { className: `card-note${project.note.by === 'agent' ? ' by-agent' : ''}`, title: `${who}写的备注${when}：\n${project.note.text}` }, [
+    el('span', { className: 'card-note-who', text: who }),
+    el('span', { text: project.note.text }),
+  ]);
+}
+
+// ---------- 备注弹窗 ----------
+
+let noteTarget = null;
+
+function openNoteDialog(project) {
+  noteTarget = project;
+  $('note-title').textContent = `「${project.name}」的备注`;
+  $('note-path').textContent = project.path;
+  noteInputEl.value = project.note?.text ?? '';
+  $('note-error').hidden = true;
+  $('note-delete').hidden = !project.note;
+  updateNoteCount();
+  noteDialogEl.showModal();
+  noteInputEl.focus();
+}
+
+function updateNoteCount() {
+  $('note-count').textContent = `${noteInputEl.value.length} / ${noteInputEl.maxLength}`;
+}
+
+async function submitNote(text) {
+  if (!noteTarget || !connected || mutating) return;
+  mutating = true;
+  try {
+    const result = await ask({ action: 'setNote', path: noteTarget.path, text });
+    const key = pathKey(result.path);
+    for (const item of state.projects) {
+      if (pathKey(item.path) !== key) continue;
+      if (result.note) item.note = result.note;
+      else delete item.note;
+    }
+    noteDialogEl.close();
+    toast(result.note ? `已保存「${noteTarget.name}」的备注` : `已删除「${noteTarget.name}」的备注`);
+    render();
+  } catch (error) {
+    $('note-error').textContent = error.message;
+    $('note-error').hidden = false;
+  } finally {
+    mutating = false;
+  }
+}
+
+/** 侧栏状态行：项目数、置顶数、上次扫描或导入是多久以前；超过 7 天提示重新扫描。 */
+function statusText() {
+  const pinnedCount = state.projects.filter((p) => p.pinned).length;
+  const parts = [pinnedCount > 0 ? `${state.projects.length} 项 · ★ ${pinnedCount}` : `${state.projects.length} 个项目`];
+  const last = state.lastImport;
+  if (last?.at) parts.push(`${sinceText(last.at)}${last.source === 'scan' ? '扫描' : '导入'}`);
+  return parts.join(' · ');
+}
+
+function sinceText(ms) {
+  const minutes = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+  if (minutes < 60) return minutes < 2 ? '刚刚' : `${minutes} 分钟前`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`;
+  return `${Math.floor(minutes / 1440)} 天前`;
 }
 
 function renderGroup(title, items, { sub = false, showLocation = false } = {}) {
@@ -684,9 +778,10 @@ function renderContent({ deal = false } = {}) {
 }
 
 function render(opts = {}) {
-  const pinnedCount = state.projects.filter((p) => p.pinned).length;
   if (connected) {
-    setStatus(pinnedCount > 0 ? `${state.projects.length} 项 · ★ ${pinnedCount}` : `${state.projects.length} 个项目`);
+    setStatus(statusText());
+    $('cabinet-status').classList.toggle('stale', Boolean(state.lastImport?.stale));
+    $('cabinet-status').title = state.lastImport?.stale ? '索引已经超过 7 天没更新，可以在对话里说「重新扫描本机 Agent 项目」' : '';
   }
   renderDrawers();
   renderAgentBar();
@@ -719,6 +814,7 @@ async function submitImport() {
   try {
     const result = await ask({ action: 'import', text });
     state.projects = result.projects;
+    state.lastImport = result.lastImport ?? state.lastImport;
     state.query = '';
     state.agentFilter = null;
     queryEl.value = '';
@@ -831,6 +927,11 @@ drawerNameEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitC
 
 $('assign-cancel').addEventListener('click', () => assignDialogEl.close());
 $('assign-submit').addEventListener('click', submitAssign);
+$('note-cancel').addEventListener('click', () => noteDialogEl.close());
+$('note-save').addEventListener('click', () => submitNote(noteInputEl.value));
+$('note-delete').addEventListener('click', () => submitNote(''));
+noteInputEl.addEventListener('input', updateNoteCount);
+noteInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitNote(noteInputEl.value); });
 assignNewEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAssign(); });
 
 themeToggleBtn.addEventListener('click', () => {
@@ -849,7 +950,7 @@ queryEl.addEventListener('input', () => {
 });
 
 document.addEventListener('keydown', (e) => {
-  const anyDialogOpen = importDialogEl.open || drawerDialogEl.open || assignDialogEl.open;
+  const anyDialogOpen = importDialogEl.open || drawerDialogEl.open || assignDialogEl.open || noteDialogEl.open;
   const typing = e.target.closest('input, textarea, select') || anyDialogOpen;
   if (e.key === 'Escape' && document.activeElement === queryEl && queryEl.value) {
     queryEl.value = '';
@@ -877,6 +978,7 @@ window.addEventListener('message', (event) => {
       .then((result) => {
         state.projects = result.projects ?? [];
         state.customDrawers = result.drawers ?? [];
+        state.lastImport = result.lastImport ?? null;
         if (result.prefs) applyPrefs(result.prefs);
         render({ deal: true });
       })
@@ -890,8 +992,10 @@ window.addEventListener('message', (event) => {
     if (data.message?.action === 'updated' && Array.isArray(data.message.projects)) {
       state.projects = data.message.projects;
       if (Array.isArray(data.message.drawers)) state.customDrawers = data.message.drawers;
-      render({ deal: true });
-      toast(`已自动扫描并同步 ${state.projects.length} 个项目`);
+      if (data.message.lastImport) state.lastImport = data.message.lastImport;
+      render({ deal: Boolean(data.message.lastImport) });
+      // 扫描推送带 lastImport；Agent 写备注的推送不带，只刷新不发牌、不提示扫描
+      if (data.message.lastImport) toast(`已自动扫描并同步 ${state.projects.length} 个项目`);
     }
     return;
   }
