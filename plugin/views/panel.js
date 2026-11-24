@@ -8,7 +8,6 @@ const contentEl = $('content');
 const queryEl = $('query');
 const sortSelectEl = $('sort-select');
 const themeToggleBtn = $('theme-toggle');
-const treeToggleBtn = $('tree-toggle');
 const importDialogEl = $('import-dialog');
 const snapshotEl = $('snapshot');
 const dialogErrorEl = $('dialog-error');
@@ -388,6 +387,34 @@ function renderAgentBar() {
 
 // ---------- 复古目录卡渲染 ----------
 
+/** 卡片上的 Agent 一行放不下时，从末尾往前收起，收起的个数显示成 +N。 */
+function fitAgentRows() {
+  for (const row of contentEl.querySelectorAll('.card-agents')) {
+    const items = [...row.querySelectorAll('.card-agent:not(.more):not(.none)')];
+    const more = row.querySelector('.card-agent.more');
+    if (!more) continue;
+    for (const item of items) item.hidden = false;
+    more.hidden = true;
+    let hiddenCount = 0;
+    while (row.scrollWidth > row.clientWidth && hiddenCount < items.length - 1) {
+      hiddenCount += 1;
+      items[items.length - hiddenCount].hidden = true;
+      more.textContent = `+${hiddenCount}`;
+      more.hidden = false;
+    }
+  }
+}
+
+let fitScheduled = false;
+function scheduleFitAgentRows() {
+  if (fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => {
+    fitScheduled = false;
+    fitAgentRows();
+  });
+}
+
 async function togglePin(project) {
   if (!connected || mutating) return;
   mutating = true;
@@ -423,18 +450,31 @@ function projectCard(project, number, showLocation = false) {
     for (const d of drawersEl.querySelectorAll('.drawer.drop')) d.classList.remove('drop');
   });
 
-  const metaParts = [];
-  if (project.agents?.length) metaParts.push(project.agents.join(' · '));
-  if (project.sessions) metaParts.push(`${project.sessions} 会话`);
-  if (project.lastActive) metaParts.push(formatAgo(project.lastActive));
-
-  const metaLine = el('span', { className: 'card-meta' });
-  if (project.indexed === false) {
-    metaLine.append(el('span', { className: 'card-loc discovered', text: 'Agent 发现' }));
-  } else if (showLocation) {
-    metaLine.append(el('span', { className: 'card-loc', text: project.category.join(' / ') || '未分类' }));
+  // 第一行：用过它的 Agent（彩色圆点 + 名字），放不下的由 fitAgentRows 收进末尾的 +N；第二行：抽屉标签、会话数、最近活跃。
+  const agents = project.agents ?? [];
+  const agentLine = el('span', {
+    className: 'card-agents',
+    title: agents.length ? `用过它的 Agent：${agents.join('、')}` : '',
+  });
+  for (const name of agents) {
+    agentLine.append(el('span', { className: 'card-agent', style: `--c:${agentColor(name)}` }, [
+      el('span', { className: 'dot' }),
+      el('span', { text: name }),
+    ]));
   }
-  metaLine.append(metaParts.join(' · ') || '点击复制路径');
+  if (agents.length) agentLine.append(el('span', { className: 'card-agent more', hidden: true }));
+  else agentLine.append(el('span', { className: 'card-agent none', text: '没有 Agent 记录' }));
+
+  const statLine = el('span', { className: 'card-meta' });
+  if (project.indexed === false) {
+    statLine.append(el('span', { className: 'card-loc discovered', text: 'Agent 发现' }));
+  } else if (showLocation) {
+    statLine.append(el('span', { className: 'card-loc', text: project.category.join(' / ') || '未分类' }));
+  }
+  const stats = [];
+  if (project.sessions) stats.push(`${project.sessions} 次会话`);
+  if (project.lastActive) stats.push(formatAgo(project.lastActive));
+  statLine.append(el('span', { className: 'card-stats', text: stats.join(' · ') || '点击复制路径' }));
 
   const openBtn = el('button', {
     type: 'button',
@@ -447,7 +487,8 @@ function projectCard(project, number, showLocation = false) {
       el('span', { className: 'card-name', text: project.name }),
     ]),
     el('span', { className: 'card-path', text: project.path }),
-    metaLine,
+    agentLine,
+    statLine,
   ]);
 
   const moveBtn = el('button', {
@@ -506,8 +547,6 @@ function renderEmptyCard(title, body, showImportBtn = false) {
 
 function renderContent({ deal = false } = {}) {
   const v = state.view;
-  treeToggleBtn.classList.toggle('active', v.kind === 'tree');
-  treeToggleBtn.textContent = v.kind === 'tree' ? '返回卡片' : 'Agent 项目树';
 
   if (state.projects.length === 0) {
     contentEl.classList.remove('graph-mode', 'dealing');
@@ -652,6 +691,7 @@ function render(opts = {}) {
   renderDrawers();
   renderAgentBar();
   renderContent(opts);
+  scheduleFitAgentRows();
 }
 
 // ---------- 弹窗：导入、新建抽屉、快捷归类 ----------
@@ -780,7 +820,6 @@ async function savePrefs(patch) {
 
 // ---------- 事件绑定 ----------
 
-$('import-open').addEventListener('click', openImportDialog);
 $('import-btn').addEventListener('click', openImportDialog);
 $('import-cancel').addEventListener('click', () => importDialogEl.close());
 importSubmitBtn.addEventListener('click', submitImport);
@@ -802,11 +841,6 @@ themeToggleBtn.addEventListener('click', () => {
 
 sortSelectEl.addEventListener('change', () => {
   savePrefs({ sort: sortSelectEl.value }).then(() => render());
-});
-
-treeToggleBtn.addEventListener('click', () => {
-  if (state.view.kind === 'tree') setView({ kind: 'all', path: [] });
-  else setView({ kind: 'tree', path: [] });
 });
 
 queryEl.addEventListener('input', () => {
@@ -879,4 +913,5 @@ function reportHeight() {
 }
 
 new ResizeObserver(reportHeight).observe($('panel'));
+new ResizeObserver(scheduleFitAgentRows).observe(contentEl);
 parent.postMessage({ tpi: 'view', type: 'ready' }, '*');

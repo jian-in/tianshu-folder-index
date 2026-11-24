@@ -289,7 +289,7 @@ button, select, input { font: inherit; color: inherit; }
   border-top: 1px solid rgba(0, 0, 0, 0.25);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
-.foot-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.foot-actions { display: grid; grid-template-columns: 1fr; gap: 7px; }
 .new-drawer {
   width: 100%;
   padding: 7px 6px;
@@ -448,7 +448,8 @@ button, select, input { font: inherit; color: inherit; }
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(226px, 1fr));
+  /* 卡片至少 260px，按容器宽度均分；窄于 260px 的侧栏里占满一列 */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
   gap: 15px 14px;
 }
 
@@ -541,14 +542,36 @@ button, select, input { font: inherit; color: inherit; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.card-meta {
-  display: block;
-  color: var(--muted);
-  font: 12px/22px var(--font-body);
+.card-agents {
+  display: flex;
+  align-items: center;
+  gap: 4px 10px;
+  height: 22px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--ink-soft);
+  font: 12px/22px var(--font-body);
   white-space: nowrap;
 }
+.card-agent { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.card-agent .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 22%, transparent);
+}
+.card-agent.more, .card-agent.none { color: var(--muted); }
+.card-agent[hidden] { display: none; }
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font: 12px/22px var(--font-body);
+  white-space: nowrap;
+}
+.card-stats { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .card-loc {
   display: inline-block;
   margin-right: 6px;
