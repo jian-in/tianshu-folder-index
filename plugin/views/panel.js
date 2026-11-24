@@ -1,4 +1,4 @@
-import { parseSnapshot, pathKey, searchProjects } from '../catalog.mjs';
+import { parseSnapshot, pathKey, projectsToMarkdown, searchProjects } from '../catalog.mjs';
 import { agentColor, formatAgo, renderGraph } from './graph.js';
 
 const $ = (id) => document.getElementById(id);
@@ -74,17 +74,18 @@ function toast(text, isError = false) {
   toastTimer = setTimeout(() => { toastEl.hidden = true; }, isError ? 4200 : 2400);
 }
 
-async function copyPath(path, name) {
+/** 复制文字：先用剪贴板接口，沙箱不允许时退回 execCommand；都不行就把内容显示出来让用户手动复制。 */
+async function copyText(text, okMessage, fallbackMessage) {
   try {
-    await navigator.clipboard.writeText(path);
-    toast(`已复制路径：${name || path}`);
-    return;
+    await navigator.clipboard.writeText(text);
+    toast(okMessage);
+    return true;
   } catch {
     // 回退复制
   }
   try {
     const temp = document.createElement('textarea');
-    temp.value = path;
+    temp.value = text;
     temp.setAttribute('readonly', '');
     temp.style.position = 'fixed';
     temp.style.opacity = '0';
@@ -93,13 +94,35 @@ async function copyPath(path, name) {
     const ok = document.execCommand('copy');
     temp.remove();
     if (ok) {
-      toast(`已复制路径：${name || path}`);
-      return;
+      toast(okMessage);
+      return true;
     }
   } catch {
     // 忽略
   }
-  toast(`路径：${path}`);
+  toast(fallbackMessage);
+  return false;
+}
+
+function copyPath(path, name) {
+  return copyText(path, `已复制路径：${name || path}`, `路径：${path}`);
+}
+
+// ---------- 复制项目清单 ----------
+
+/** 当前视图里画出来的项目（按显示顺序，置顶项在「全部卡片」里会出现两次，复制时去重）。 */
+let shownProjects = [];
+
+function copyProjectList() {
+  if (!shownProjects.length) {
+    toast('当前视图没有项目可复制', true);
+    return;
+  }
+  const viewTitle = $('view-title').textContent || '项目清单';
+  const title = state.query || state.agentFilter ? `筛选结果：${viewTitle}` : viewTitle;
+  const markdown = projectsToMarkdown(shownProjects, title, formatAgo);
+  const count = markdown.split('\n').filter((line) => line.startsWith('- **')).length;
+  copyText(markdown, `已复制 ${count} 个项目的清单（Markdown）`, '复制失败：当前环境不允许写入剪贴板');
 }
 
 function el(tag, props = {}, children = []) {
@@ -616,6 +639,7 @@ function sinceText(ms) {
 
 function renderGroup(title, items, { sub = false, showLocation = false } = {}) {
   const ordered = sortItems(items);
+  shownProjects.push(...ordered);
   const grid = el('div', { className: 'cards' });
   ordered.forEach((p, idx) => grid.append(projectCard(p, idx + 1, showLocation)));
   return el('section', { className: sub ? 'group sub' : 'group' }, [
@@ -641,6 +665,7 @@ function renderEmptyCard(title, body, showImportBtn = false) {
 
 function renderContent({ deal = false } = {}) {
   const v = state.view;
+  shownProjects = [];
 
   if (state.projects.length === 0) {
     contentEl.classList.remove('graph-mode', 'dealing');
@@ -660,6 +685,7 @@ function renderContent({ deal = false } = {}) {
     $('crumb').textContent = state.query ? `AGENT 项 目 树 · 搜索“${state.query}”` : 'A G E N T 项 目 树';
     $('view-title').textContent = 'Agent 项目树';
     const visible = state.query ? searchProjects(state.projects, state.query) : state.projects;
+    shownProjects = [...visible];
     const wrap = el('div', { className: 'graph-wrap' });
     contentEl.replaceChildren(wrap);
     renderGraph(wrap, visible, {
@@ -933,6 +959,8 @@ $('note-delete').addEventListener('click', () => submitNote(''));
 noteInputEl.addEventListener('input', updateNoteCount);
 noteInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitNote(noteInputEl.value); });
 assignNewEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAssign(); });
+
+$('copy-list').addEventListener('click', copyProjectList);
 
 themeToggleBtn.addEventListener('click', () => {
   const idx = THEME_CYCLE.indexOf(state.prefs.theme);

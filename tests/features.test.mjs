@@ -1,10 +1,10 @@
-// 项目画像（技术栈、Git 分支）、项目备注、最近项目与上次扫描时间。
+// 项目画像（技术栈、Git 分支）、项目备注、最近项目与上次扫描时间、拼音首字母搜索、Markdown 清单。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseSnapshot, searchProjects, serializeSnapshot } from '../plugin/catalog.mjs';
+import { parseSnapshot, pinyinInitials, projectsToMarkdown, searchProjects, serializeSnapshot } from '../plugin/catalog.mjs';
 import { profileProject } from '../plugin/scanner.mjs';
 
 globalThis.__tianshuTPI = { version: '2.0', defineTianshuPlugin: (spec) => spec };
@@ -80,6 +80,42 @@ test('快照保留技术栈和分支，搜索能按技术栈、分支和备注�
   assert.equal(searchProjects([withNote], 'feat/x').length, 1);
   assert.equal(searchProjects([withNote], 'npm test').length, 1);
   assert.equal(searchProjects([withNote], 'python').length, 0);
+});
+
+test('拼音首字母：汉字取首字母，字母数字保留；名称和抽屉都能按首字母搜到', () => {
+  assert.equal(pinyinInitials('考研'), 'ky');
+  assert.equal(pinyinInitials('A_我的'), 'awd');
+  assert.equal(pinyinInitials('脱硝氨水 (LLM) 报表'), 'txasllmbb');
+  assert.equal(pinyinInitials('知识库'), 'zsk');
+  assert.equal(pinyinInitials('吖'), 'a');
+  assert.equal(pinyinInitials('rag-knowledge-base'), '', '纯英文名不需要首字母');
+
+  const projects = [
+    { name: '考研', category: ['学习'], path: 'E:/kaoyan' },
+    { name: 'demo插件', category: ['项目'], path: 'E:/plugin' },
+    { name: 'kyber', category: [], path: 'E:/kyber' },
+  ];
+  assert.deepEqual(searchProjects(projects, 'ky').map((p) => p.name).sort(), ['kyber', '考研']);
+  assert.deepEqual(searchProjects(projects, 'xm').map((p) => p.name), ['demo插件']);
+  assert.deepEqual(searchProjects(projects, 'xx ky').map((p) => p.name), ['考研']);
+  assert.deepEqual(searchProjects(projects, 'cj').map((p) => p.name), ['demo插件']);
+});
+
+test('Markdown 清单：按显示顺序去重，带技术栈、分支、抽屉、Agent 和备注', () => {
+  const projects = [
+    { name: 'Atlas', category: ['开发'], path: 'E:/atlas', stack: ['Rust'], branch: 'main', agents: ['Claude', 'Codex'], lastActive: Date.UTC(2026, 10, 20), note: { text: '下一步：\n发版', by: 'user', updatedAt: 1 } },
+    { name: 'Notes', category: [], path: 'E:/notes' },
+    { name: 'Atlas', category: ['开发'], path: 'E:/ATLAS' },
+  ];
+  assert.equal(projectsToMarkdown(projects, '全部卡片'), [
+    '## 全部卡片（2 个项目）',
+    '',
+    '- **Atlas** `E:/atlas` — Rust · 分支 main · 抽屉 开发 · 最近 2026-11-20 · Claude、Codex',
+    '  - 备注：下一步： 发版',
+    '- **Notes** `E:/notes`',
+    '',
+  ].join('\n'));
+  assert.match(projectsToMarkdown(projects.slice(0, 1), 'x', () => '3 天前'), /最近 3 天前/);
 });
 
 test('备注：面板和 Agent 都能写，重新导入后保留，同名项目要求用路径，空字符串删除', async (t) => {
